@@ -25,7 +25,7 @@ export const startChargingSimulation = (
     } catch (error) {
       console.error("Failed to publish SOC update to Ably:", error);
     }
-  }, 4000);
+  }, 1000);
 
   state.powerInterval = setInterval(() => {
     if (!state.connectedSocket) {
@@ -87,7 +87,7 @@ export const startChargingSimulation = (
       // Disconnect client after a short delay
       setTimeout(() => {
         state.connectedSocket?.disconnect();
-      }, 1000);
+      }, 2000);
     }
   }, 1000);
 };
