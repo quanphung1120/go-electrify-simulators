@@ -1,14 +1,12 @@
 import axios, { AxiosInstance } from "axios";
-import { HandshakeResponse } from "./types";
+import { HandshakeResponse, HandshakeApiResponse, PingResponse } from "./types";
 import { STATUS_CODES } from "http";
+import { SharedState } from "./state";
 
-export let handshakeResponse: HandshakeResponse | null = null;
-
-export async function startDock() {
+export async function startDock(state: SharedState) {
   const BACKEND_URL = process.env.BACKEND_URL;
   const DOCK_ID = process.env.DOCK_ID;
   const SECRET = process.env.DOCK_SECRET;
-  const DOCK_JWT = process.env.DOCK_JWT;
 
   const api: AxiosInstance = axios.create({
     baseURL: BACKEND_URL,
@@ -18,9 +16,9 @@ export async function startDock() {
     },
   });
 
-  const handshake = await api.post<{ data: HandshakeResponse }>(
+  const handshake = await api.post<HandshakeApiResponse>(
     `/api/v1/docks/${DOCK_ID}/handshake`,
-    { secretKey: SECRET }
+    { SecretKey: SECRET }
   );
 
   if (handshake.status > 299) {
@@ -31,7 +29,17 @@ export async function startDock() {
     );
   }
 
-  const payload = handshake.data.data;
-  console.log("Dock handshake successful:", payload);
-  handshakeResponse = payload;
+  state.handshakeResponse = handshake.data;
+  console.log("Dock handshake successful:", state.handshakeResponse);
+
+  setInterval(async () => {
+    const ping = await api.post<PingResponse>(`/api/v1/docks/ping`, {
+      DockId: DOCK_ID,
+      SecretKey: SECRET,
+    });
+
+    if (ping.status >= 200 && ping.status < 300) {
+      console.log("Ping successful. Server time:", ping.data.serverTime);
+    }
+  }, 5000);
 }

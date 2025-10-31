@@ -1,6 +1,5 @@
 import { Server, Socket } from "socket.io";
 import { SharedState, resetChargingState } from "./state";
-import { handshakeResponse } from "./AblyCore";
 
 export const setupSocketHandlers = (io: Server, state: SharedState): void => {
   io.on("connection", (socket: Socket) => {
@@ -29,9 +28,9 @@ export const setupSocketHandlers = (io: Server, state: SharedState): void => {
       state.maxCapacity = config.maxCapacity;
 
       socket.emit("handshake_success", {
-        sessionId: handshakeResponse!.sessionId,
-        channelId: handshakeResponse!.channelId,
-        joinCode: handshakeResponse!.joinCode || "N/A",
+        sessionId: state.handshakeResponse!.data.sessionId,
+        channelId: state.handshakeResponse!.channelId,
+        joinCode: state.handshakeResponse!.data.joinCode || "N/A",
         message:
           "Successfully connected to dock. Waiting for charging to start.",
         timestamp: new Date().toISOString(),

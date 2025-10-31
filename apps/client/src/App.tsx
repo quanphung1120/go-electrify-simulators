@@ -71,7 +71,17 @@ function App() {
   });
 
   const addMessage = (message: string) => {
-    setMessages((prev) => [...prev, `${new Date().toISOString()}: ${message}`]);
+    const now = new Date();
+    const vietnameseDate = now.toLocaleString("vi-VN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    setMessages((prev) => [...prev, `${vietnameseDate}: ${message}`]);
   };
 
   // Set up socket event listeners when socket changes

@@ -1,4 +1,5 @@
 import { Socket } from "socket.io";
+import { HandshakeApiResponse } from "./types";
 
 export interface SharedState {
   connectedClients: number;
@@ -9,6 +10,7 @@ export interface SharedState {
   currentCapacity: number;
   maxCapacity: number;
   targetSOC: number;
+  handshakeResponse: HandshakeApiResponse | null;
 }
 
 export const createSharedState = (): SharedState => ({
@@ -20,6 +22,7 @@ export const createSharedState = (): SharedState => ({
   currentCapacity: 0,
   maxCapacity: 0,
   targetSOC: 0,
+  handshakeResponse: null,
 });
 
 export const resetChargingState = (state: SharedState): void => {

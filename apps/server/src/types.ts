@@ -48,12 +48,40 @@ export interface SessionSpecs {
   targetSoc: number;
 }
 
+export interface Charger {
+  id: number;
+  code: string;
+  stationId: number;
+  connectorTypeId: number;
+  powerKw: number;
+  status: string;
+  dockStatus: string;
+  ablyChannel: string;
+  lastConnectedAt: string | null;
+  lastPingAt: string | null;
+  pricePerKwh: number;
+}
+
+export interface PingResponse {
+  ok: boolean;
+  serverTime: string;
+}
+
 export interface HandshakeResponse {
   sessionId: number;
   channelId: string;
   dockJwt: string;
   ablyToken?: string;
   joinCode?: string;
+  expiresAt?: string;
+  charger?: Charger;
+}
+
+export interface HandshakeApiResponse {
+  status: string;
+  channelId: string;
+  ok: boolean;
+  data: HandshakeResponse;
 }
 
 export interface StopSessionDto {

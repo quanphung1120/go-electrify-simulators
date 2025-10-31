@@ -1,19 +1,41 @@
 import { Socket } from "socket.io";
 import { SharedState } from "./state";
-import { handshakeResponse } from "./AblyCore";
+import axios from "axios";
+import { DockLogRequest } from "./types";
+
+const sendLogToBackend = async (logData: DockLogRequest) => {
+  try {
+    const BACKEND_URL = process.env.BACKEND_URL;
+    await axios.post(`${BACKEND_URL}/api/v1/docks/log`, logData);
+    console.log("Log sent to backend:", logData);
+  } catch (error) {
+    console.error("Failed to send log to backend:", error);
+  }
+};
 
 export const startChargingSimulation = (
   state: SharedState,
   realtimeClient: any,
   channel: any
 ): void => {
-  // Start Ably publishing interval (every 4 seconds)
+  // Start logging interval (every 1 second)
   state.ablyPublishInterval = setInterval(() => {
-    if (!state.connectedSocket || !state.isCharging) {
+    if (!state.isCharging) {
       return;
     }
 
     const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
+    const logData: DockLogRequest = {
+      dockId: parseInt(process.env.DOCK_ID || "0"),
+      secretKey: process.env.DOCK_SECRET || "",
+      sampleAt: new Date().toISOString(),
+      socPercent: Math.round(currentSOC),
+      state: "CHARGING",
+      sessionEnergyKwh: state.currentCapacity,
+    };
+
+    sendLogToBackend(logData);
+
     try {
       channel.publish("soc_update", {
         soc: Math.round(currentSOC * 100) / 100,
@@ -34,7 +56,8 @@ export const startChargingSimulation = (
       return;
     }
 
-    const powerConsumptionPerSecond = 1; // 1 kW per second
+    const powerConsumptionPerSecond =
+      state.handshakeResponse?.data.charger?.powerKw!; // 1 kW per second
     state.currentCapacity = Math.min(
       state.maxCapacity,
       state.currentCapacity + powerConsumptionPerSecond * 5 // 5 seconds interval
@@ -56,6 +79,17 @@ export const startChargingSimulation = (
     if (currentSOC >= state.targetSOC) {
       console.log(`Target SOC ${state.targetSOC}% reached. Stopping charging.`);
 
+      // Send final log to backend
+      const finalLogData: DockLogRequest = {
+        dockId: parseInt(process.env.DOCK_ID || "0"),
+        secretKey: process.env.DOCK_SECRET || "",
+        sampleAt: new Date().toISOString(),
+        socPercent: Math.round(currentSOC),
+        state: "PARKING",
+        sessionEnergyKwh: state.currentCapacity,
+      };
+
+      sendLogToBackend(finalLogData);
       state.connectedSocket.emit("charging_complete", {
         message: `Charging complete! Reached target SOC of ${state.targetSOC}%`,
         finalCapacity: state.currentCapacity,
@@ -70,7 +104,7 @@ export const startChargingSimulation = (
         finalCapacity: state.currentCapacity,
         targetSOC: state.targetSOC,
         timestamp: new Date().toISOString(),
-        sessionId: handshakeResponse!.sessionId,
+        sessionId: state.handshakeResponse!.data.sessionId,
       };
 
       try {

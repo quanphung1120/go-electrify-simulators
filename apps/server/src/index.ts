@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   // Initialize dock handshake
   try {
-    await startDock();
+    await startDock(state);
     console.log("Dock initialization successful");
     console.log(
       "The QR to connect to this dock is available at http://localhost:" +
