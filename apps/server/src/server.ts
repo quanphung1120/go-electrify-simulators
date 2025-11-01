@@ -9,7 +9,7 @@ export interface ServerComponents {
   io: Server;
 }
 
-export const createExpressApp = (): ServerComponents => {
+export function createExpressApp(): ServerComponents {
   const app = express();
   const server = createServer(app);
   const io = new Server(server, {
@@ -64,4 +64,4 @@ export const createExpressApp = (): ServerComponents => {
   // });
 
   return { app, server, io };
-};
+}

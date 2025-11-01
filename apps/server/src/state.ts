@@ -11,22 +11,27 @@ export interface SharedState {
   maxCapacity: number;
   targetSOC: number;
   handshakeResponse: HandshakeApiResponse | null;
+  sessionChargedKwh: number;
 }
 
-export const createSharedState = (): SharedState => ({
-  connectedClients: 0,
-  isCharging: false,
-  connectedSocket: null,
-  powerInterval: null,
-  ablyPublishInterval: null,
-  currentCapacity: 0,
-  maxCapacity: 0,
-  targetSOC: 0,
-  handshakeResponse: null,
-});
+export function createSharedState(): SharedState {
+  return {
+    connectedClients: 0,
+    isCharging: false,
+    connectedSocket: null,
+    powerInterval: null,
+    ablyPublishInterval: null,
+    currentCapacity: 0,
+    maxCapacity: 0,
+    targetSOC: 0,
+    handshakeResponse: null,
+    sessionChargedKwh: 0,
+  };
+}
 
-export const resetChargingState = (state: SharedState): void => {
+export function resetChargingState(state: SharedState): void {
   state.isCharging = false;
+  state.sessionChargedKwh = 0;
   if (state.powerInterval) {
     clearInterval(state.powerInterval);
     state.powerInterval = null;
@@ -35,4 +40,4 @@ export const resetChargingState = (state: SharedState): void => {
     clearInterval(state.ablyPublishInterval);
     state.ablyPublishInterval = null;
   }
-};
+}

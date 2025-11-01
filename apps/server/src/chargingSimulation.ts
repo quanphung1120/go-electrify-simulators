@@ -1,24 +1,124 @@
 import { Socket } from "socket.io";
 import { SharedState } from "./state";
-import axios from "axios";
 import { DockLogRequest } from "./types";
 
-const sendLogToBackend = async (logData: DockLogRequest) => {
+async function sendLogToBackend(logData: DockLogRequest): Promise<void> {
   try {
     const BACKEND_URL = process.env.BACKEND_URL;
-    await axios.post(`${BACKEND_URL}/api/v1/docks/log`, logData);
-    console.log("Log sent to backend:", logData);
+    const response = await fetch(`${BACKEND_URL}/api/v1/docks/log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(logData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      console.error(
+        `Failed to send log to backend (status ${response.status}):`,
+        errorText
+      );
+    } else {
+      console.log("Log sent to backend:", logData);
+    }
   } catch (error) {
     console.error("Failed to send log to backend:", error);
   }
-};
+}
 
-export const startChargingSimulation = (
+async function completeChargingSession(
+  state: SharedState,
+  backendUrl: string,
+  channel: any,
+  status: "completed" | "interrupted",
+  reason: string
+): Promise<void> {
+  const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
+
+  // Send final log to backend
+  const finalLogData: DockLogRequest = {
+    dockId: parseInt(process.env.DOCK_ID || "0"),
+    secretKey: process.env.DOCK_SECRET || "",
+    sampleAt: new Date().toISOString(),
+    socPercent: Math.round(currentSOC),
+    state: "PARKING",
+    sessionEnergyKwh: state.currentCapacity,
+  };
+
+  sendLogToBackend(finalLogData);
+
+  // Emit charging complete to client (if still connected)
+  if (state.connectedSocket) {
+    state.connectedSocket.emit("charging_complete", {
+      message: reason,
+      finalCapacity: state.currentCapacity,
+      finalSOC: currentSOC,
+      sessionChargedKwh: state.sessionChargedKwh,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // Publish charging complete message to Ably
+  const completeMessage = {
+    status,
+    finalSOC: Math.round(currentSOC * 100) / 100,
+    finalCapacity: state.currentCapacity,
+    targetSOC: state.targetSOC,
+    sessionChargedKwh: state.sessionChargedKwh,
+    timestamp: new Date().toISOString(),
+    sessionId: state.handshakeResponse!.data.sessionId,
+  };
+
+  // Complete session with backend
+  try {
+    const response = await fetch(`${backendUrl}/api/v1/sessions/complete`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.DOCK_SECRET}`,
+      },
+      body: JSON.stringify({
+        EnergyKwh: state.sessionChargedKwh,
+        DurationSeconds: 60,
+        EndSoc: Math.round(currentSOC),
+        PricePerKwhOverride: 0,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Unknown error");
+      console.error(
+        `Failed to complete session with backend (status ${response.status}):`,
+        errorText
+      );
+    }
+  } catch (error) {
+    console.error("Failed to complete session with backend:", error);
+  }
+
+  // Publish to Ably
+  try {
+    channel.publish("charging_complete", completeMessage);
+    console.log(
+      `Published charging ${status} to Ably: ${completeMessage.finalSOC}%`
+    );
+  } catch (error) {
+    console.error(`Failed to publish charging ${status} to Ably:`, error);
+  }
+
+  resetChargingState(state);
+}
+
+export function startChargingSimulation(
   state: SharedState,
   realtimeClient: any,
   channel: any
-): void => {
+): void {
   // Start logging interval (every 1 second)
+
+  const BACKEND_URL = process.env.BACKEND_URL || "";
+
   state.ablyPublishInterval = setInterval(() => {
     if (!state.isCharging) {
       return;
@@ -51,24 +151,35 @@ export const startChargingSimulation = (
 
   state.powerInterval = setInterval(() => {
     if (!state.connectedSocket) {
-      console.log("Socket disconnected during charging, stopping...");
-      resetChargingState(state);
+      console.log("Socket disconnected during charging, completing session...");
+      completeChargingSession(
+        state,
+        BACKEND_URL,
+        channel,
+        "interrupted",
+        `Charging interrupted! Vehicle disconnected at ${((state.currentCapacity / state.maxCapacity) * 100).toFixed(1)}% SOC`
+      ).catch((error) =>
+        console.error("Error completing interrupted session:", error)
+      );
       return;
     }
 
     const powerConsumptionPerSecond =
-      state.handshakeResponse?.data.charger?.powerKw!; // 1 kW per second
+      state.handshakeResponse?.data.charger?.powerKw!;
+    const kwhConsumed = powerConsumptionPerSecond * 5; // 5 seconds interval
     state.currentCapacity = Math.min(
       state.maxCapacity,
-      state.currentCapacity + powerConsumptionPerSecond * 5 // 5 seconds interval
+      state.currentCapacity + kwhConsumed
     );
+    state.sessionChargedKwh += kwhConsumed;
 
     const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
     state.connectedSocket.emit("power_update", {
-      kwh: powerConsumptionPerSecond * 5,
+      kwh: kwhConsumed,
       currentCapacity: state.currentCapacity,
       maxCapacity: state.maxCapacity,
       currentSOC: currentSOC,
+      sessionChargedKwh: state.sessionChargedKwh,
       timestamp: new Date().toISOString(),
     });
 
@@ -79,54 +190,22 @@ export const startChargingSimulation = (
     if (currentSOC >= state.targetSOC) {
       console.log(`Target SOC ${state.targetSOC}% reached. Stopping charging.`);
 
-      // Send final log to backend
-      const finalLogData: DockLogRequest = {
-        dockId: parseInt(process.env.DOCK_ID || "0"),
-        secretKey: process.env.DOCK_SECRET || "",
-        sampleAt: new Date().toISOString(),
-        socPercent: Math.round(currentSOC),
-        state: "PARKING",
-        sessionEnergyKwh: state.currentCapacity,
-      };
+      completeChargingSession(
+        state,
+        BACKEND_URL,
+        channel,
+        "completed",
+        `Charging complete! Reached target SOC of ${state.targetSOC}%`
+      ).catch((error) => console.error("Error completing session:", error));
 
-      sendLogToBackend(finalLogData);
-      state.connectedSocket.emit("charging_complete", {
-        message: `Charging complete! Reached target SOC of ${state.targetSOC}%`,
-        finalCapacity: state.currentCapacity,
-        finalSOC: currentSOC,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Publish charging complete message to Ably
-      const completeMessage = {
-        status: "completed",
-        finalSOC: Math.round(currentSOC * 100) / 100,
-        finalCapacity: state.currentCapacity,
-        targetSOC: state.targetSOC,
-        timestamp: new Date().toISOString(),
-        sessionId: state.handshakeResponse!.data.sessionId,
-      };
-
-      try {
-        channel.publish("charging_complete", completeMessage);
-        console.log(
-          `Published charging complete to Ably: ${completeMessage.finalSOC}%`
-        );
-      } catch (error) {
-        console.error("Failed to publish charging complete to Ably:", error);
-      }
-
-      resetChargingState(state);
-
-      // Disconnect client after a short delay
       setTimeout(() => {
         state.connectedSocket?.disconnect();
       }, 2000);
     }
   }, 1000);
-};
+}
 
-const resetChargingState = (state: SharedState): void => {
+function resetChargingState(state: SharedState): void {
   state.isCharging = false;
   if (state.powerInterval) {
     clearInterval(state.powerInterval);
@@ -136,4 +215,4 @@ const resetChargingState = (state: SharedState): void => {
     clearInterval(state.ablyPublishInterval);
     state.ablyPublishInterval = null;
   }
-};
+}

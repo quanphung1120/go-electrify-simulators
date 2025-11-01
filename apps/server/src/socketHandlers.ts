@@ -1,7 +1,7 @@
 import { Server, Socket } from "socket.io";
 import { SharedState, resetChargingState } from "./state";
 
-export const setupSocketHandlers = (io: Server, state: SharedState): void => {
+export function setupSocketHandlers(io: Server, state: SharedState): void {
   io.on("connection", (socket: Socket) => {
     if (state.connectedClients >= 1) {
       console.log("Connection rejected: Another client is already connected");
@@ -50,4 +50,4 @@ export const setupSocketHandlers = (io: Server, state: SharedState): void => {
       resetChargingState(state);
     });
   });
-};
+}

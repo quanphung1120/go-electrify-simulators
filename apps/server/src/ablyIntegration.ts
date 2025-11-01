@@ -1,10 +1,9 @@
 import * as Ably from "ably";
 import { SharedState } from "./state";
 import { startChargingSimulation } from "./chargingSimulation";
-import axios, { AxiosInstance } from "axios";
 
-export const setupAblyIntegration = (state: SharedState) => {
-  const BACKEND_URL = process.env.BACKEND_URL;
+export function setupAblyIntegration(state: SharedState) {
+  const BACKEND_URL = process.env.BACKEND_URL || "";
   const DOCK_ID = process.env.DOCK_ID;
   const SECRET = process.env.DOCK_SECRET;
 
@@ -15,14 +14,6 @@ export const setupAblyIntegration = (state: SharedState) => {
   const channel = realtimeClient.channels.get(
     state.handshakeResponse!.channelId
   );
-
-  const api: AxiosInstance = axios.create({
-    baseURL: BACKEND_URL,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${SECRET}`,
-    },
-  });
 
   channel.subscribe("session_specs", (message: any) => {
     console.log("Session specs received:", message.data);
@@ -68,18 +59,47 @@ export const setupAblyIntegration = (state: SharedState) => {
     console.log("Starting charging simulation...");
 
     // Notify backend that charging has started
-    api
-      .post("/api/v1/sessions/start", {
-        Id: state.handshakeResponse!.data.sessionId,
+    const jwtToken = state.handshakeResponse?.data.dockJwt;
+    console.log("DOCK JWT:", jwtToken);
+    console.log("JWT Length:", jwtToken?.length);
+
+    try {
+      const requestBody = {
+        SessionId: state.handshakeResponse!.data.sessionId,
         TargetSoc: state.targetSOC,
-      })
-      .then((response) => {
-        if (response.status >= 200 || response.status < 300) {
-          startChargingSimulation(state, realtimeClient, channel);
-          console.log("Charging session started successfully");
-        }
+      };
+
+      const response = await fetch(`${BACKEND_URL}/api/v1/sessions/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${jwtToken}`,
+        },
+        body: JSON.stringify(requestBody),
       });
+
+      console.log("Response status:", response.status);
+      console.log(
+        "Response headers:",
+        Object.fromEntries(response.headers.entries())
+      );
+
+      if (response.ok) {
+        startChargingSimulation(state, realtimeClient, channel);
+        console.log("Charging session started successfully");
+      } else {
+        const text = await response.text().catch(() => "Unknown error");
+        console.error(
+          `Failed to start session with backend (status ${response.status}):` +
+            text
+        );
+        state.isCharging = false; // Reset charging state on failure
+      }
+    } catch (error) {
+      console.error("Failed to start session with backend:", error);
+      state.isCharging = false; // Reset charging state on failure
+    }
   });
 
   return { realtimeClient, channel };
-};
+}
