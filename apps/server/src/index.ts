@@ -2,11 +2,9 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-import { startDock } from "./AblyCore";
 import { createSharedState } from "./state";
 import { createExpressApp } from "./server";
 import { setupSocketHandlers } from "./socketHandlers";
-import { setupAblyIntegration } from "./ablyIntegration";
 
 async function main(): Promise<void> {
   const PORT = process.env.PORT || 3001;
@@ -17,25 +15,7 @@ async function main(): Promise<void> {
   // Create Express app and Socket.IO server
   const { app, server, io } = createExpressApp();
 
-  // Initialize dock handshake
-  try {
-    await startDock(state);
-    console.log("Dock initialization successful");
-    console.log(
-      "The QR to connect to this dock is available at http://localhost:" +
-        PORT +
-        "/qr"
-    );
-  } catch (error) {
-    console.error("Failed to initialize dock:", error);
-    console.error("Application will exit due to dock initialization failure");
-    process.exit(1);
-  }
-
-  // Setup Ably integration
-  setupAblyIntegration(state);
-
-  // Setup Socket.IO handlers
+  // Setup Socket.IO handlers (handshake will be triggered when car connects)
   setupSocketHandlers(io, state);
 
   // Start server
@@ -43,6 +23,7 @@ async function main(): Promise<void> {
     .listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
       console.log(`Process PID: ${process.pid}, PPID: ${process.ppid}`);
+      console.log("Waiting for car connection to initiate handshake...");
     })
     .on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {

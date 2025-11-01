@@ -3,76 +3,68 @@ import { io, Socket } from "socket.io-client";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { SOCKET_EVENTS } from "@go-electrify/shared-types";
+import type {
+  HandshakeSuccessMessage,
+  PowerUpdateMessage,
+  ChargingCompleteMessage,
+  ConnectionRejectedMessage,
+} from "@go-electrify/shared-types";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "./components/ui/card";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { ScrollArea } from "./components/ui/scroll-area";
+import { Progress } from "./components/ui/progress";
+import { Badge } from "./components/ui/badge";
+import { Separator } from "./components/ui/separator";
+import { ModeToggle } from "./components/mode-toggle";
 import QRCode from "react-qr-code";
 import "./App.css";
 
 const formSchema = z.object({
   batteryCapacity: z.number().min(0),
   maxCapacity: z.number().min(0),
-  targetSOC: z.number().min(0).max(100),
-  socketUrl: z.string().url(),
+  socketUrl: z.url(),
 });
 
 type FormData = z.infer<typeof formSchema>;
-
-// Event data types
-interface PowerUpdateData {
-  kwh: number;
-  currentCapacity: number;
-  maxCapacity: number;
-  currentSOC: number;
-  timestamp: string;
-}
-
-interface HandshakeSuccessData {
-  sessionId: number;
-  channelId: string;
-  joinCode: string;
-  message: string;
-  timestamp: string;
-}
-
-interface ConnectionRejectedData {
-  message: string;
-  timestamp: string;
-}
-
-interface ChargingCompleteData {
-  message: string;
-  finalCapacity: number;
-  finalSOC: number;
-  timestamp: string;
-}
 
 function App() {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [messages, setMessages] = useState<string[]>([]);
   const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [isCharging, setIsCharging] = useState(false);
 
   const {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       batteryCapacity: 100,
       maxCapacity: 200,
-      targetSOC: 80,
       socketUrl: "http://localhost:3001",
     },
   });
 
+  const batteryCapacity = watch("batteryCapacity");
+  const maxCapacity = watch("maxCapacity");
+
   const addMessage = (message: string) => {
     const now = new Date();
-    const vietnameseDate = now.toLocaleString("vi-VN", {
+    const timestamp = now.toLocaleString("vi-VN", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -81,10 +73,9 @@ function App() {
       second: "2-digit",
       hour12: false,
     });
-    setMessages((prev) => [...prev, `${vietnameseDate}: ${message}`]);
+    setMessages((prev) => [...prev, `[${timestamp}] ${message}`]);
   };
 
-  // Set up socket event listeners when socket changes
   useEffect(() => {
     if (!socket) return;
 
@@ -95,79 +86,87 @@ function App() {
 
     function onDisconnect() {
       setIsConnected(false);
+      setJoinCode(null);
+      setSessionId(null);
+      setIsCharging(false);
       addMessage(`Disconnected from server`);
     }
 
-    function onPowerUpdate(data: PowerUpdateData) {
+    function onPowerUpdate(data: PowerUpdateMessage) {
       setValue("batteryCapacity", data.currentCapacity);
+      setIsCharging(true);
       addMessage(
-        `Power update: ${data.kwh} kWh charged, Current: ${data.currentCapacity}/${data.maxCapacity} kWh (${data.currentSOC.toFixed(1)}%)`
+        `Power update: +${data.kwh.toFixed(2)} kWh | ${data.currentCapacity.toFixed(1)}/${data.maxCapacity} kWh (${data.currentSOC.toFixed(1)}%)`
       );
     }
 
-    function onHandshakeSuccess(data: HandshakeSuccessData) {
+    function onHandshakeSuccess(data: HandshakeSuccessMessage) {
       setJoinCode(data.joinCode);
-      addMessage(`Handshake success: ${data.message}`);
-      addMessage(`Session ID: ${data.sessionId}`);
+      setSessionId(data.sessionId);
+      addMessage(`${data.message}`);
+      addMessage(`Session ID: #${data.sessionId}`);
       addMessage(`Channel ID: ${data.channelId}`);
       addMessage(`Join Code: ${data.joinCode}`);
     }
 
-    function onConnectionRejected(data: ConnectionRejectedData) {
-      addMessage(`Connection rejected: ${data.message}`);
+    function onConnectionRejected(data: ConnectionRejectedMessage) {
+      addMessage(`Connection rejected: ${data.reason}`);
       setIsConnected(false);
+      setJoinCode(null);
+      setSessionId(null);
     }
 
-    function onChargingComplete(data: ChargingCompleteData) {
-      addMessage(`Charging complete: ${data.message}`);
+    function onChargingComplete(data: ChargingCompleteMessage) {
+      setIsCharging(false);
+      addMessage(`${data.message}`);
+      addMessage(
+        `Final capacity: ${data.finalCapacity.toFixed(1)} kWh (${data.finalSOC.toFixed(1)}%)`
+      );
     }
 
-    // Register event listeners
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-    socket.on("power_update", onPowerUpdate);
-    socket.on("handshake_success", onHandshakeSuccess);
-    socket.on("connection_rejected", onConnectionRejected);
-    socket.on("charging_complete", onChargingComplete);
+    socket.on(SOCKET_EVENTS.POWER_UPDATE, onPowerUpdate);
+    socket.on(SOCKET_EVENTS.HANDSHAKE_SUCCESS, onHandshakeSuccess);
+    socket.on(SOCKET_EVENTS.CONNECTION_REJECTED, onConnectionRejected);
+    socket.on(SOCKET_EVENTS.CHARGING_COMPLETE, onChargingComplete);
 
-    // Cleanup function to remove event listeners
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-      socket.off("power_update", onPowerUpdate);
-      socket.off("handshake_success", onHandshakeSuccess);
-      socket.off("connection_rejected", onConnectionRejected);
-      socket.off("charging_complete", onChargingComplete);
+      socket.off(SOCKET_EVENTS.POWER_UPDATE, onPowerUpdate);
+      socket.off(SOCKET_EVENTS.HANDSHAKE_SUCCESS, onHandshakeSuccess);
+      socket.off(SOCKET_EVENTS.CONNECTION_REJECTED, onConnectionRejected);
+      socket.off(SOCKET_EVENTS.CHARGING_COMPLETE, onChargingComplete);
     };
   }, [socket, setValue]);
 
   const onSubmit = (data: FormData) => {
-    // Disconnect existing socket if connected
     if (socket) {
       socket.disconnect();
       setSocket(null);
     }
 
-    // Create new socket instance with autoConnect: false
     const socketInstance = io(data.socketUrl, {
       autoConnect: false,
     });
 
     setSocket(socketInstance);
-
-    // Connect manually
     socketInstance.connect();
 
-    // Send configuration after connection is established
     socketInstance.once("connect", () => {
-      socketInstance.emit("configure_simulation", {
+      addMessage("Connected to server, waiting for handshake...");
+    });
+
+    // Send configuration after handshake is complete
+    socketInstance.once(SOCKET_EVENTS.HANDSHAKE_SUCCESS, () => {
+      socketInstance.emit(SOCKET_EVENTS.CAR_CONFIGURE, {
         batteryCapacity: data.batteryCapacity,
         maxCapacity: data.maxCapacity,
-        targetSOC: data.targetSOC,
         timestamp: new Date().toISOString(),
       });
       addMessage(
-        `Sent configuration: ${data.batteryCapacity} kWh / ${data.maxCapacity} kWh max / ${data.targetSOC}% target SOC`
+        `Configuration sent: ${data.batteryCapacity} kWh / ${data.maxCapacity} kWh`
       );
     });
   };
@@ -179,149 +178,215 @@ function App() {
       setSocket(null);
       setIsConnected(false);
       setJoinCode(null);
+      setSessionId(null);
+      setIsCharging(false);
       addMessage("Disconnected manually");
     }
   };
 
+  const batteryPercentage =
+    maxCapacity > 0 ? (batteryCapacity / maxCapacity) * 100 : 0;
+
   return (
-    <div className="container mx-auto p-8 max-w-7xl">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Giả Lập Xe Hơi</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form
-              id="main-form"
-              onSubmit={handleSubmit(onSubmit)}
-              className="space-y-6"
-            >
-              <div className="space-y-3">
-                <Label htmlFor="batteryCapacity" className="text-lg">
-                  Battery Capacity (kWh)
-                </Label>
-                <Input
-                  id="batteryCapacity"
-                  type="number"
-                  min="0"
-                  disabled={isConnected}
-                  className="text-lg h-12"
-                  {...register("batteryCapacity", { valueAsNumber: true })}
-                />
-                {errors.batteryCapacity && (
-                  <p className="text-sm text-destructive">
-                    {errors.batteryCapacity.message}
-                  </p>
-                )}
-              </div>
+    <div className="min-h-screen bg-background">
+      <header className="border-b">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="text-left">
+            <h1 className="text-xl font-semibold">Go-Electrify Simulator</h1>
+            <p className="text-xs text-muted-foreground">
+              Electric Vehicle Charging Dock
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {isConnected && (
+              <Badge
+                variant={isCharging ? "default" : "secondary"}
+                className="text-xs"
+              >
+                {isCharging ? "CHARGING" : "CONNECTED"}
+              </Badge>
+            )}
+            <ModeToggle />
+          </div>
+        </div>
+      </header>
 
-              <div className="space-y-3">
-                <Label htmlFor="maxCapacity" className="text-lg">
-                  Maximum Capacity (kWh)
-                </Label>
-                <Input
-                  id="maxCapacity"
-                  type="number"
-                  min="0"
-                  disabled={isConnected}
-                  className="text-lg h-12"
-                  {...register("maxCapacity", { valueAsNumber: true })}
-                />
-                {errors.maxCapacity && (
-                  <p className="text-sm text-destructive">
-                    {errors.maxCapacity.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <Label htmlFor="targetSOC" className="text-lg">
-                  Target SOC (%)
-                </Label>
-                <Input
-                  id="targetSOC"
-                  type="number"
-                  min="0"
-                  max="100"
-                  disabled={isConnected}
-                  className="text-lg h-12"
-                  {...register("targetSOC", { valueAsNumber: true })}
-                />
-                {errors.targetSOC && (
-                  <p className="text-sm text-destructive">
-                    {errors.targetSOC.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="space-y-3">
-                <Label htmlFor="socketUrl" className="text-lg">
-                  Socket.IO URL
-                </Label>
-                <Input
-                  id="socketUrl"
-                  disabled={isConnected}
-                  placeholder="http://localhost:3001"
-                  className="text-lg h-12"
-                  {...register("socketUrl")}
-                />
-                {errors.socketUrl && (
-                  <p className="text-sm text-destructive">
-                    {errors.socketUrl.message}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex gap-4">
-                <Button type="submit" className="text-lg h-12 px-6">
-                  Connect
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={handleDisconnect}
-                  className="text-lg h-12 px-6"
-                >
-                  Disconnect
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Console</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[500px] w-full rounded border p-6">
-              <div className="font-mono text-base space-y-2">
-                {messages.length === 0 ? (
-                  <p className="text-muted-foreground text-lg">
-                    No messages received yet
-                  </p>
-                ) : (
-                  messages.map((message, index) => (
-                    <div key={index} className="text-sm">
-                      {message}
-                    </div>
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
-
-        {joinCode && (
-          <Card>
+      <div className="container mx-auto p-4 md:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Card className="lg:col-span-1">
             <CardHeader>
-              <CardTitle className="text-2xl">Join Code QR</CardTitle>
+              <CardTitle>Vehicle Configuration</CardTitle>
+              <CardDescription>
+                Connect your EV to the charging dock
+              </CardDescription>
             </CardHeader>
-            <CardContent className="flex justify-center">
-              <QRCode value={joinCode} size={256} />
+            <CardContent>
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="batteryCapacity">
+                    Current Capacity (kWh)
+                  </Label>
+                  <Input
+                    id="batteryCapacity"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    disabled={isConnected}
+                    {...register("batteryCapacity", { valueAsNumber: true })}
+                  />
+                  {errors.batteryCapacity && (
+                    <p className="text-sm text-destructive">
+                      {errors.batteryCapacity.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="maxCapacity">Maximum Capacity (kWh)</Label>
+                  <Input
+                    id="maxCapacity"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    disabled={isConnected}
+                    {...register("maxCapacity", { valueAsNumber: true })}
+                  />
+                  {errors.maxCapacity && (
+                    <p className="text-sm text-destructive">
+                      {errors.maxCapacity.message}
+                    </p>
+                  )}
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <Label htmlFor="socketUrl">Socket.IO URL</Label>
+                  <Input
+                    id="socketUrl"
+                    disabled={isConnected}
+                    placeholder="http://localhost:3001"
+                    {...register("socketUrl")}
+                  />
+                  {errors.socketUrl && (
+                    <p className="text-sm text-destructive">
+                      {errors.socketUrl.message}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <Button
+                    type="submit"
+                    className="flex-1"
+                    disabled={isConnected}
+                  >
+                    Connect
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleDisconnect}
+                    disabled={!isConnected}
+                  >
+                    Disconnect
+                  </Button>
+                </div>
+              </form>
+
+              {isConnected && (
+                <>
+                  <Separator className="my-4" />
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        Battery Status
+                      </span>
+                      <span className="font-medium">
+                        {batteryPercentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <Progress value={batteryPercentage} className="h-3" />
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{batteryCapacity.toFixed(1)} kWh</span>
+                      <span>{maxCapacity} kWh</span>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
-        )}
+
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle>Console</CardTitle>
+              <CardDescription>System output</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ScrollArea className="h-[600px] w-full rounded border bg-black dark:bg-gray-950 p-3">
+                <div className="font-mono text-xs text-green-400 space-y-0.5">
+                  {messages.length === 0 ? (
+                    <div className="text-gray-500">
+                      $ Waiting for connection...
+                    </div>
+                  ) : (
+                    messages.map((message, index) => (
+                      <div key={index} className="leading-relaxed text-left">
+                        {message}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
+          <Card className="lg:col-span-1">
+            <CardHeader>
+              <CardTitle>Session QR Code</CardTitle>
+              <CardDescription>Scan to connect from dashboard</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {joinCode ? (
+                <div className="space-y-4">
+                  <div className="flex justify-center p-6 bg-white dark:bg-gray-50 rounded-lg">
+                    <QRCode value={joinCode} size={220} />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Join Code:</span>
+                      <Badge
+                        variant="outline"
+                        className="text-base font-mono px-3 py-1"
+                      >
+                        {joinCode}
+                      </Badge>
+                    </div>
+                    {sessionId && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Session ID:</span>
+                        <span className="text-sm text-muted-foreground">
+                          #{sessionId}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center h-[300px]">
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      No active session
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Connect your vehicle to generate QR code
+                    </p>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

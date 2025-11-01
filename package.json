@@ -3,13 +3,21 @@
   "private": true,
   "packageManager": "pnpm@10.19.0",
   "scripts": {
-    "build": "turbo run build",
-    "dev": "turbo run dev",
-    "lint": "turbo run lint",
-    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "turbo run check-types"
+  "build": "turbo run build",
+  "check-types": "turbo run check-types",
+  "dev": "turbo run dev --parallel",
+  "dev:client": "turbo run dev --filter=client",
+  "dev:server": "turbo run dev --filter=server",
+  "lint": "turbo run lint",
+  "lint:fix": "turbo run lint:fix",
+  "test": "turbo run test",
+    "test:watch": "turbo run test:watch",
+    "format": "turbo run format",
+    "preview": "turbo run preview",
+    "clean": "turbo run clean"
   },
   "devDependencies": {
+    "@turbo/gen": "^2.6.0",
     "prettier": "^3.6.2",
     "turbo": "^2.5.8",
     "typescript": "5.9.2"

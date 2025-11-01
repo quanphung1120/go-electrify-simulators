@@ -67,10 +67,19 @@ pnpm run dev:client    # Chỉ chạy giao diện web
 pnpm run dev:server    # Chỉ chạy server backend
 ```
 
-### 4. Truy cập ứng dụng
+### 4. Kết nối xe (Client)
+
+1. Mở giao diện web tại `http://localhost:5173`
+2. Nhập thông tin pin xe (battery capacity, max capacity, target SOC)
+3. Nhấn "Connect" để kết nối với dock
+4. Server sẽ tự động handshake với backend và tạo session
+5. QR code sẽ xuất hiện để dashboard có thể quét và điều khiển sạc
+
+### 5. Truy cập ứng dụng
 
 - **Giao diện web**: `http://localhost:5173`
 - **Server API**: `http://localhost:3001`
+- **Health Check**: `http://localhost:3001/healthz`
 
 ## 🔧 Công nghệ sử dụng
 
@@ -86,6 +95,8 @@ pnpm run dev:server    # Chỉ chạy server backend
 - ✅ Mô phỏng quá trình sạc xe điện
 - ✅ Giao tiếp real-time với backend qua Ably
 - ✅ WebSocket connection cho client
+- ✅ **Lazy handshake** - Chỉ tạo session khi có xe kết nối
+- ✅ Automatic cleanup khi xe ngắt kết nối
 - ✅ RESTful API endpoints
 - ✅ Comprehensive error logging
 - ✅ Environment-based configuration
@@ -121,14 +132,6 @@ kill -9 <PID>
 - Fetch API thay vì axios cho HTTP requests
 - Comprehensive error logging cho debugging
 - Environment variables được quản lý qua `.env` files
-
-## 🤝 Contributing
-
-1. Fork repository
-2. Tạo feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -m 'Add some feature'`
-4. Push to branch: `git push origin feature/your-feature`
-5. Tạo Pull Request
 
 ## 📄 License
 

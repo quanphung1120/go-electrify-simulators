@@ -1,20 +1,61 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [".env", "tsconfig.json"],
+  "globalDependencies": [
+    "**/.env.*local",
+    "**/.env.local",
+    "**/.env"
+  ],
+  "ui": "tui",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", ".env*"],
-      "outputs": ["dist/**"]
+      "inputs": [
+        "src/**",
+        "public/**",
+        "index.html",
+        "vite.config.*",
+        "package.json",
+        "tsconfig.json",
+        ".env*"
+      ],
+      "outputs": ["dist/**", "build/**", ".next/**", ".nuxt/**", ".output/**"]
+    },
+    "check-types": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "tsconfig.json", "**/tsconfig.json"]
     },
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "dependsOn": ["^build"]
     },
     "lint": {
-      "dependsOn": ["^lint"]
+      "dependsOn": ["^lint"],
+      "inputs": ["src/**", ".eslintrc*", "eslint.config.*", "**/.eslintrc*", "**/eslint.config.*"]
+    },
+    "lint:fix": {
+      "dependsOn": ["^lint:fix"],
+      "inputs": ["src/**", ".eslintrc*", "eslint.config.*", "**/.eslintrc*", "**/eslint.config.*"]
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "**/*.test.*", "**/*.spec.*", "jest.config.*", "vitest.config.*"],
+      "outputs": ["coverage/**"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
     },
     "clean": {
+      "cache": false
+    },
+    "format": {
+      "inputs": ["src/**", "**/*.md", ".prettierrc*", "prettier.config.*"],
+      "outputs": []
+    },
+    "preview": {
+      "dependsOn": ["build"],
       "cache": false
     }
   }

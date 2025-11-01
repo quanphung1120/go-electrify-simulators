@@ -4,13 +4,17 @@
   "private": true,
   "scripts": {
     "build": "tsc",
+    "check-types": "tsc --noEmit",
     "clean": "rm -rf dist",
     "dev": "tsx watch --clear-screen=false src/index.ts",
     "lint": "tsc --noEmit && eslint \"src/**/*.ts*\" --max-warnings 0",
+    "lint:fix": "eslint \"src/**/*.ts*\" --fix",
     "start": "node -r esbuild-register ./src/index.ts",
-    "test": "jest --detectOpenHandles"
+    "test": "jest --detectOpenHandles",
+    "test:watch": "jest --watch --detectOpenHandles"
   },
   "dependencies": {
+    "@go-electrify/shared-types": "workspace:*",
     "ably": "^2.14.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

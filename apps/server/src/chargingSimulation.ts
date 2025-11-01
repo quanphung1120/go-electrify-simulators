@@ -1,6 +1,6 @@
-import { Socket } from "socket.io";
-import { SharedState } from "./state";
+import { SharedState, resetChargingState } from "./state";
 import { DockLogRequest } from "./types";
+import { SOCKET_EVENTS, ABLY_EVENTS } from "@go-electrify/shared-types";
 
 async function sendLogToBackend(logData: DockLogRequest): Promise<void> {
   try {
@@ -50,11 +50,11 @@ async function completeChargingSession(
 
   // Emit charging complete to client (if still connected)
   if (state.connectedSocket) {
-    state.connectedSocket.emit("charging_complete", {
+    state.connectedSocket.emit(SOCKET_EVENTS.CHARGING_COMPLETE, {
       message: reason,
       finalCapacity: state.currentCapacity,
+      maxCapacity: state.maxCapacity,
       finalSOC: currentSOC,
-      sessionChargedKwh: state.sessionChargedKwh,
       timestamp: new Date().toISOString(),
     });
   }
@@ -97,14 +97,18 @@ async function completeChargingSession(
     console.error("Failed to complete session with backend:", error);
   }
 
-  // Publish to Ably
-  try {
-    channel.publish("charging_complete", completeMessage);
-    console.log(
-      `Published charging ${status} to Ably: ${completeMessage.finalSOC}%`
-    );
-  } catch (error) {
-    console.error(`Failed to publish charging ${status} to Ably:`, error);
+  // Publish to Ably (only if connection still active)
+  if (state.ablyChannel && state.ablyRealtimeClient) {
+    try {
+      channel.publish(ABLY_EVENTS.CHARGING_EVENT, completeMessage);
+      console.log(
+        `Published charging ${status} to Ably: ${completeMessage.finalSOC}%`
+      );
+    } catch (error) {
+      console.error(`Failed to publish charging ${status} to Ably:`, error);
+    }
+  } else {
+    console.log("Ably connection closed, skipping charging_complete publish");
   }
 
   resetChargingState(state);
@@ -136,16 +140,19 @@ export function startChargingSimulation(
 
     sendLogToBackend(logData);
 
-    try {
-      channel.publish("soc_update", {
-        soc: Math.round(currentSOC * 100) / 100,
-        timestamp: new Date().toISOString(),
-      });
-      console.log(
-        `Published SOC update to Ably: ${Math.round(currentSOC * 100) / 100}%`
-      );
-    } catch (error) {
-      console.error("Failed to publish SOC update to Ably:", error);
+    // Only publish to Ably if connection is still active
+    if (state.ablyChannel && state.ablyRealtimeClient) {
+      try {
+        channel.publish("soc_update", {
+          soc: Math.round(currentSOC * 100) / 100,
+          timestamp: new Date().toISOString(),
+        });
+        console.log(
+          `Published SOC update to Ably: ${Math.round(currentSOC * 100) / 100}%`
+        );
+      } catch (error) {
+        console.error("Failed to publish SOC update to Ably:", error);
+      }
     }
   }, 1000);
 
@@ -174,12 +181,11 @@ export function startChargingSimulation(
     state.sessionChargedKwh += kwhConsumed;
 
     const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
-    state.connectedSocket.emit("power_update", {
+    state.connectedSocket.emit(SOCKET_EVENTS.POWER_UPDATE, {
       kwh: kwhConsumed,
       currentCapacity: state.currentCapacity,
       maxCapacity: state.maxCapacity,
       currentSOC: currentSOC,
-      sessionChargedKwh: state.sessionChargedKwh,
       timestamp: new Date().toISOString(),
     });
 
@@ -203,16 +209,4 @@ export function startChargingSimulation(
       }, 2000);
     }
   }, 1000);
-}
-
-function resetChargingState(state: SharedState): void {
-  state.isCharging = false;
-  if (state.powerInterval) {
-    clearInterval(state.powerInterval);
-    state.powerInterval = null;
-  }
-  if (state.ablyPublishInterval) {
-    clearInterval(state.ablyPublishInterval);
-    state.ablyPublishInterval = null;
-  }
 }
