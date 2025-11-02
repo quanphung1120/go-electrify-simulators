@@ -17,6 +17,8 @@ export interface SharedState {
   isHandshakeComplete: boolean;
   ablyRealtimeClient: any | null;
   ablyChannel: any | null;
+  completionInProgress: Promise<void> | null;
+  sessionStartTime: number | null;
 }
 
 export function createSharedState(): SharedState {
@@ -36,12 +38,15 @@ export function createSharedState(): SharedState {
     isHandshakeComplete: false,
     ablyRealtimeClient: null,
     ablyChannel: null,
+    completionInProgress: null,
+    sessionStartTime: null,
   };
 }
 
 export function resetChargingState(state: SharedState): void {
   state.isCharging = false;
   state.sessionChargedKwh = 0;
+  state.sessionStartTime = null;
 
   if (state.powerInterval) {
     clearInterval(state.powerInterval);
@@ -74,7 +79,18 @@ export function cleanupAblyConnection(state: SharedState): void {
   }
 }
 
-export function cleanupConnection(state: SharedState): void {
+export async function cleanupConnection(state: SharedState): Promise<void> {
+  // Wait for any ongoing completion to finish before cleanup
+  if (state.completionInProgress) {
+    console.log("Waiting for charging completion to finish...");
+    try {
+      await state.completionInProgress;
+      console.log("Charging completion finished, proceeding with cleanup");
+    } catch (error) {
+      console.error("Error during completion wait:", error);
+    }
+  }
+
   // Stop charging if active
   resetChargingState(state);
 
@@ -88,10 +104,22 @@ export function cleanupConnection(state: SharedState): void {
     console.log("Ping interval stopped");
   }
 
+  if (state.connectedSocket) {
+    try {
+      state.connectedSocket.removeAllListeners();
+    } catch (error) {
+      console.error("Error removing socket listeners during cleanup:", error);
+    }
+    state.connectedSocket = null;
+  }
+
   // Reset connection state
   state.currentCapacity = 0;
   state.maxCapacity = 0;
   state.targetSOC = 0;
+  state.sessionChargedKwh = 0;
+  state.sessionStartTime = null;
   state.isHandshakeComplete = false;
   state.handshakeResponse = null;
+  state.completionInProgress = null;
 }

@@ -34,6 +34,12 @@ export interface ConnectionRejectedMessage {
   timestamp: string;
 }
 
+export interface ServerErrorMessage {
+  message: string;
+  timestamp: string;
+  reason?: string;
+}
+
 export interface ValidationErrorMessage {
   event: string;
   error: string;

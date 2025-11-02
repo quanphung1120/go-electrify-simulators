@@ -4,6 +4,7 @@ export const SOCKET_EVENTS = {
   POWER_UPDATE: "power_update",
   CHARGING_COMPLETE: "charging_complete",
   CONNECTION_REJECTED: "connection_rejected",
+  SERVER_ERROR: "server_error",
   VALIDATION_ERROR: "validation_error",
   CONFIGURATION_COMPLETE: "configuration_complete",
 } as const;

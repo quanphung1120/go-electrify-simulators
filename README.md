@@ -2,32 +2,6 @@
 
 Ứng dụng mô phỏng trạm sạc điện cho xe điện Go-Electrify, bao gồm giao diện web và server backend.
 
-## 🏗️ Cấu trúc dự án
-
-```
-go-electrify-simulators/
-├── apps/
-│   ├── client/          # Giao diện web (React + Vite)
-│   │   ├── src/
-│   │   │   ├── components/  # UI components
-│   │   │   └── hooks/       # React hooks
-│   │   └── public/          # Static assets
-│   └── server/          # Server backend (Node.js + TypeScript)
-│       ├── src/
-│       │   ├── AblyCore.ts          # Kết nối Ably cho handshake
-│       │   ├── ablyIntegration.ts   # Tích hợp Ably real-time
-│       │   ├── chargingSimulation.ts # Logic mô phỏng sạc
-│       │   ├── server.ts            # HTTP server
-│       │   ├── socketHandlers.ts    # WebSocket handlers
-│       │   ├── state.ts             # Quản lý state
-│       │   └── types.ts             # TypeScript types
-│       └── .env.example             # Template cấu hình
-├── packages/
-│   ├── eslint-config/   # ESLint configuration
-│   └── typescript-config/ # TypeScript configuration
-└── turbo.json           # Turborepo configuration
-```
-
 ## 🚀 Cách chạy ứng dụng
 
 ### Yêu cầu hệ thống

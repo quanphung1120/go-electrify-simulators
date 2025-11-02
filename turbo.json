@@ -1,45 +1,76 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [
-    "**/.env.*local",
-    "**/.env.local",
-    "**/.env"
-  ],
+  "globalDependencies": ["**/.env.*local", "**/.env.local", "**/.env"],
   "ui": "tui",
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "inputs": [
-        "src/**",
-        "public/**",
-        "index.html",
-        "vite.config.*",
-        "package.json",
-        "tsconfig.json",
-        ".env*"
-      ],
-      "outputs": ["dist/**", "build/**", ".next/**", ".nuxt/**", ".output/**"]
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": [
+        "dist/**",
+        "build/**",
+        ".next/**",
+        ".nuxt/**",
+        ".output/**",
+        "!.next/cache/**"
+      ]
+    },
+    "client#build": {
+      "outputs": ["dist/**"]
+    },
+    "server#build": {
+      "outputs": ["dist/**"]
     },
     "check-types": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json", "**/tsconfig.json"]
+      "dependsOn": ["^check-types"],
+      "inputs": ["$TURBO_DEFAULT$", "tsconfig.json", "**/tsconfig.json"]
     },
     "dev": {
       "cache": false,
       "persistent": true,
       "dependsOn": ["^build"]
     },
+    "client#dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
+    },
+    "server#dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["^build"]
+    },
     "lint": {
       "dependsOn": ["^lint"],
-      "inputs": ["src/**", ".eslintrc*", "eslint.config.*", "**/.eslintrc*", "**/eslint.config.*"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".eslintrc*",
+        "eslint.config.*",
+        "**/.eslintrc*",
+        "**/eslint.config.*"
+      ],
+      "outputs": []
     },
     "lint:fix": {
       "dependsOn": ["^lint:fix"],
-      "inputs": ["src/**", ".eslintrc*", "eslint.config.*", "**/.eslintrc*", "**/eslint.config.*"]
+      "cache": false,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        ".eslintrc*",
+        "eslint.config.*",
+        "**/.eslintrc*",
+        "**/eslint.config.*"
+      ]
     },
     "test": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "**/*.test.*", "**/*.spec.*", "jest.config.*", "vitest.config.*"],
+      "dependsOn": ["^build", "^test"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "**/*.test.*",
+        "**/*.spec.*",
+        "jest.config.*",
+        "vitest.config.*"
+      ],
       "outputs": ["coverage/**"]
     },
     "test:watch": {
@@ -51,7 +82,13 @@
       "cache": false
     },
     "format": {
-      "inputs": ["src/**", "**/*.md", ".prettierrc*", "prettier.config.*"],
+      "cache": false,
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "**/*.md",
+        ".prettierrc*",
+        "prettier.config.*"
+      ],
       "outputs": []
     },
     "preview": {

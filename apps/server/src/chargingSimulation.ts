@@ -1,129 +1,65 @@
-import { SharedState, resetChargingState } from "./state";
+import { SharedState } from "./state";
 import { DockLogRequest } from "./types";
-import { SOCKET_EVENTS, ABLY_EVENTS } from "@go-electrify/shared-types";
+import { SOCKET_EVENTS } from "@go-electrify/shared-types";
+import { backendClient, formatAxiosError } from "./httpClient";
+import { completeChargingSession } from "./sessionCompletion";
+
+const LOG_INTERVAL_MS = 1000;
+const POWER_INTERVAL_MS = 1000;
 
 async function sendLogToBackend(logData: DockLogRequest): Promise<void> {
   try {
-    const BACKEND_URL = process.env.BACKEND_URL;
-    const response = await fetch(`${BACKEND_URL}/api/v1/docks/log`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(logData),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
-      console.error(
-        `Failed to send log to backend (status ${response.status}):`,
-        errorText
-      );
-    } else {
-      console.log("Log sent to backend:", logData);
-    }
+    await backendClient.post("/api/v1/docks/log", logData);
+    console.log("Log sent to backend:", logData);
   } catch (error) {
-    console.error("Failed to send log to backend:", error);
+    console.error("Failed to send log to backend:", formatAxiosError(error));
   }
 }
 
-async function completeChargingSession(
+export const startChargingSimulation = (
   state: SharedState,
-  backendUrl: string,
-  channel: any,
-  status: "completed" | "interrupted",
-  reason: string
-): Promise<void> {
-  const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
-
-  // Send final log to backend
-  const finalLogData: DockLogRequest = {
-    dockId: parseInt(process.env.DOCK_ID || "0"),
-    secretKey: process.env.DOCK_SECRET || "",
-    sampleAt: new Date().toISOString(),
-    socPercent: Math.round(currentSOC),
-    state: "PARKING",
-    sessionEnergyKwh: state.currentCapacity,
-  };
-
-  sendLogToBackend(finalLogData);
-
-  // Emit charging complete to client (if still connected)
-  if (state.connectedSocket) {
-    state.connectedSocket.emit(SOCKET_EVENTS.CHARGING_COMPLETE, {
-      message: reason,
-      finalCapacity: state.currentCapacity,
-      maxCapacity: state.maxCapacity,
-      finalSOC: currentSOC,
-      timestamp: new Date().toISOString(),
-    });
-  }
-
-  // Publish charging complete message to Ably
-  const completeMessage = {
-    status,
-    finalSOC: Math.round(currentSOC * 100) / 100,
-    finalCapacity: state.currentCapacity,
-    targetSOC: state.targetSOC,
-    sessionChargedKwh: state.sessionChargedKwh,
-    timestamp: new Date().toISOString(),
-    sessionId: state.handshakeResponse!.data.sessionId,
-  };
-
-  // Complete session with backend
-  try {
-    const response = await fetch(`${backendUrl}/api/v1/sessions/complete`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.DOCK_SECRET}`,
-      },
-      body: JSON.stringify({
-        EnergyKwh: state.sessionChargedKwh,
-        DurationSeconds: 60,
-        EndSoc: Math.round(currentSOC),
-        PricePerKwhOverride: 0,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
-      console.error(
-        `Failed to complete session with backend (status ${response.status}):`,
-        errorText
-      );
-    }
-  } catch (error) {
-    console.error("Failed to complete session with backend:", error);
-  }
-
-  // Publish to Ably (only if connection still active)
-  if (state.ablyChannel && state.ablyRealtimeClient) {
-    try {
-      channel.publish(ABLY_EVENTS.CHARGING_EVENT, completeMessage);
-      console.log(
-        `Published charging ${status} to Ably: ${completeMessage.finalSOC}%`
-      );
-    } catch (error) {
-      console.error(`Failed to publish charging ${status} to Ably:`, error);
-    }
-  } else {
-    console.log("Ably connection closed, skipping charging_complete publish");
-  }
-
-  resetChargingState(state);
-}
-
-export function startChargingSimulation(
-  state: SharedState,
-  realtimeClient: any,
+  _realtimeClient: any,
   channel: any
-): void {
-  // Start logging interval (every 1 second)
+): void => {
+  // Session start time should already be set in chargingHandler before API call
+  if (!state.sessionStartTime) {
+    state.sessionStartTime = Date.now();
+  }
+  console.log(
+    "Charging session started at:",
+    new Date(state.sessionStartTime).toISOString()
+  );
 
-  const BACKEND_URL = process.env.BACKEND_URL || "";
+  const clearIntervals = (): void => {
+    if (state.powerInterval) {
+      clearInterval(state.powerInterval);
+      state.powerInterval = null;
+    }
+    if (state.ablyPublishInterval) {
+      clearInterval(state.ablyPublishInterval);
+      state.ablyPublishInterval = null;
+    }
+  };
 
-  state.ablyPublishInterval = setInterval(() => {
+  const finalizeSession = async (
+    reason: string,
+    options?: { disconnectAfter?: boolean }
+  ): Promise<void> => {
+    try {
+      await completeChargingSession(state, channel, reason);
+      if (options?.disconnectAfter) {
+        console.log("Completion message sent, disconnecting client...");
+        state.connectedSocket?.disconnect();
+      }
+    } catch (error) {
+      console.error("Error completing session:", error);
+      if (options?.disconnectAfter) {
+        state.connectedSocket?.disconnect();
+      }
+    }
+  };
+
+  const handleLogTick = (): void => {
     if (!state.isCharging) {
       return;
     }
@@ -135,12 +71,11 @@ export function startChargingSimulation(
       sampleAt: new Date().toISOString(),
       socPercent: Math.round(currentSOC),
       state: "CHARGING",
-      sessionEnergyKwh: state.currentCapacity,
+      sessionEnergyKwh: Math.round(state.sessionChargedKwh * 100) / 100,
     };
 
     sendLogToBackend(logData);
 
-    // Only publish to Ably if connection is still active
     if (state.ablyChannel && state.ablyRealtimeClient) {
       try {
         channel.publish("soc_update", {
@@ -154,59 +89,84 @@ export function startChargingSimulation(
         console.error("Failed to publish SOC update to Ably:", error);
       }
     }
-  }, 1000);
+  };
 
-  state.powerInterval = setInterval(() => {
+  const handlePowerTick = (): void => {
     if (!state.connectedSocket) {
       console.log("Socket disconnected during charging, completing session...");
-      completeChargingSession(
-        state,
-        BACKEND_URL,
-        channel,
-        "interrupted",
+
+      state.isCharging = false;
+      clearIntervals();
+
+      finalizeSession(
         `Charging interrupted! Vehicle disconnected at ${((state.currentCapacity / state.maxCapacity) * 100).toFixed(1)}% SOC`
-      ).catch((error) =>
-        console.error("Error completing interrupted session:", error)
       );
       return;
     }
 
-    const powerConsumptionPerSecond =
-      state.handshakeResponse?.data.charger?.powerKw!;
-    const kwhConsumed = powerConsumptionPerSecond * 5; // 5 seconds interval
+    const maxChargerPowerKw = state.handshakeResponse?.data.charger?.powerKw;
+
+    // Safety check for missing charger power
+    if (!maxChargerPowerKw || maxChargerPowerKw <= 0) {
+      console.error("Invalid charger power configuration");
+      state.isCharging = false;
+      clearIntervals();
+      return;
+    }
+
+    const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
+
+    let actualPowerKw = maxChargerPowerKw;
+    if (currentSOC >= 95) {
+      actualPowerKw = maxChargerPowerKw * 0.2;
+    } else if (currentSOC >= 90) {
+      actualPowerKw = maxChargerPowerKw * 0.4;
+    } else if (currentSOC >= 80) {
+      const taperingFactor = 1 - ((currentSOC - 80) / 10) * 0.3;
+      actualPowerKw = maxChargerPowerKw * taperingFactor;
+    }
+
+    const intervalHours = 1 / 3600;
+    const kwhConsumed = actualPowerKw * intervalHours;
+
+    const previousCapacity = state.currentCapacity;
     state.currentCapacity = Math.min(
       state.maxCapacity,
       state.currentCapacity + kwhConsumed
     );
-    state.sessionChargedKwh += kwhConsumed;
 
-    const currentSOC = (state.currentCapacity / state.maxCapacity) * 100;
+    const actualKwhDelivered = state.currentCapacity - previousCapacity;
+    state.sessionChargedKwh += actualKwhDelivered;
+
+    const newSOC = (state.currentCapacity / state.maxCapacity) * 100;
+
     state.connectedSocket.emit(SOCKET_EVENTS.POWER_UPDATE, {
-      kwh: kwhConsumed,
-      currentCapacity: state.currentCapacity,
-      maxCapacity: state.maxCapacity,
-      currentSOC: currentSOC,
+      kwh: Math.round(actualKwhDelivered * 100) / 100,
+      currentCapacity: Math.round(state.currentCapacity * 100) / 100,
+      maxCapacity: Math.round(state.maxCapacity * 100) / 100,
+      currentSOC: Math.round(newSOC * 100) / 100,
+      chargingPowerKw: Math.round(actualPowerKw * 100) / 100,
       timestamp: new Date().toISOString(),
     });
 
     console.log(
-      `Power update sent - Current capacity: ${state.currentCapacity} kWh (${currentSOC.toFixed(1)}%)`
+      `Power update - SOC: ${newSOC.toFixed(1)}% | Capacity: ${state.currentCapacity.toFixed(3)} kWh | ` +
+        `Power: ${actualPowerKw.toFixed(2)} kW | Energy added: ${(actualKwhDelivered * 1000).toFixed(2)} Wh`
     );
 
     if (currentSOC >= state.targetSOC) {
       console.log(`Target SOC ${state.targetSOC}% reached. Stopping charging.`);
 
-      completeChargingSession(
-        state,
-        BACKEND_URL,
-        channel,
-        "completed",
-        `Charging complete! Reached target SOC of ${state.targetSOC}%`
-      ).catch((error) => console.error("Error completing session:", error));
+      state.isCharging = false;
+      clearIntervals();
 
-      setTimeout(() => {
-        state.connectedSocket?.disconnect();
-      }, 2000);
+      finalizeSession(
+        `Charging complete! Reached target SOC of ${state.targetSOC}%`,
+        { disconnectAfter: true }
+      );
     }
-  }, 1000);
-}
+  };
+
+  state.ablyPublishInterval = setInterval(handleLogTick, LOG_INTERVAL_MS);
+  state.powerInterval = setInterval(handlePowerTick, POWER_INTERVAL_MS);
+};

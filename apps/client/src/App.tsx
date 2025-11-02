@@ -9,6 +9,7 @@ import type {
   PowerUpdateMessage,
   ChargingCompleteMessage,
   ConnectionRejectedMessage,
+  ServerErrorMessage,
 } from "@go-electrify/shared-types";
 import {
   Card,
@@ -124,12 +125,28 @@ function App() {
       );
     }
 
+    function onServerError(data: ServerErrorMessage) {
+      addMessage(`Server notice: ${data.message}`);
+      if (data.reason) {
+        addMessage(`Details: ${data.reason}`);
+      }
+      setIsConnected(false);
+      setJoinCode(null);
+      setSessionId(null);
+      setIsCharging(false);
+      if (socket?.connected) {
+        socket.disconnect();
+      }
+      setSocket(null);
+    }
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on(SOCKET_EVENTS.POWER_UPDATE, onPowerUpdate);
     socket.on(SOCKET_EVENTS.HANDSHAKE_SUCCESS, onHandshakeSuccess);
     socket.on(SOCKET_EVENTS.CONNECTION_REJECTED, onConnectionRejected);
     socket.on(SOCKET_EVENTS.CHARGING_COMPLETE, onChargingComplete);
+    socket.on(SOCKET_EVENTS.SERVER_ERROR, onServerError);
 
     return () => {
       socket.off("connect", onConnect);
@@ -138,6 +155,7 @@ function App() {
       socket.off(SOCKET_EVENTS.HANDSHAKE_SUCCESS, onHandshakeSuccess);
       socket.off(SOCKET_EVENTS.CONNECTION_REJECTED, onConnectionRejected);
       socket.off(SOCKET_EVENTS.CHARGING_COMPLETE, onChargingComplete);
+      socket.off(SOCKET_EVENTS.SERVER_ERROR, onServerError);
     };
   }, [socket, setValue]);
 
