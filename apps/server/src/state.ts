@@ -97,13 +97,6 @@ export async function cleanupConnection(state: SharedState): Promise<void> {
   // Cleanup Ably
   cleanupAblyConnection(state);
 
-  // Stop ping interval
-  if (state.pingInterval) {
-    clearInterval(state.pingInterval);
-    state.pingInterval = null;
-    console.log("Ping interval stopped");
-  }
-
   if (state.connectedSocket) {
     try {
       state.connectedSocket.removeAllListeners();
